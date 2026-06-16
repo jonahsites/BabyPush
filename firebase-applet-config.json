@@ -1,10 +1,10 @@
 {
-  "projectId": "remixed-project-id",
-  "appId": "remixed-app-id",
-  "apiKey": "remixed-api-key",
-  "authDomain": "remixed-auth-domain",
-  "firestoreDatabaseId": "remixed-firestore-database-id",
-  "storageBucket": "remixed-storage-bucket",
-  "messagingSenderId": "remixed-messaging-sender-id",
-  "measurementId": "remixed-measurement-id"
+  "projectId": "babypush-77fda",
+  "appId": "1:541577717992:web:3c26012285a0cd3ffb015d",
+  "apiKey": "AIzaSyBwYqNd0jl5vm2MLInGqAEh61U0-zCCQvw",
+  "authDomain": "babypush-77fda.firebaseapp.com",
+  "firestoreDatabaseId": "(default)",
+  "storageBucket": "babypush-77fda.firebasestorage.app",
+  "messagingSenderId": "541577717992",
+  "measurementId": "G-7K9FTHHT60"
 }

@@ -29,9 +29,9 @@ const db = (firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDataba
   ? getClientFirestore(clientApp, firebaseConfig.firestoreDatabaseId)
   : getClientFirestore(clientApp);
 
-// Dedicated named app for verifying client "babypush" project auth ID tokens
+// Dedicated named app for verifying client project auth ID tokens dynamically
 const authApp = admin.apps.find(app => app && app.name === "authApp") 
-  || admin.initializeApp({ projectId: "babypush" }, "authApp");
+  || admin.initializeApp({ projectId: firebaseConfig.projectId }, "authApp");
 
 const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
 
