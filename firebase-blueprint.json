@@ -1,0 +1,95 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile with donation stats.",
+      "type": "object",
+      "properties": {
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "totalDonated": { "type": "number" },
+        "currentTokens": { "type": "number" }
+      },
+      "required": ["displayName", "totalDonated", "currentTokens"]
+    },
+    "GameState": {
+      "title": "Game State",
+      "description": "Represents the shared real-time state of the game board.",
+      "type": "object",
+      "properties": {
+        "bluePos": { "type": "object", "properties": { "x": { "type": "number" }, "y": { "type": "number" } } },
+        "redPos": { "type": "object", "properties": { "x": { "type": "number" }, "y": { "type": "number" } } },
+        "blueRot": { "type": "number" },
+        "redRot": { "type": "number" },
+        "blueTokens": { "type": "number" },
+        "redTokens": { "type": "number" },
+        "blueTrail": { "type": "array", "items": { "type": "string" } },
+        "redTrail": { "type": "array", "items": { "type": "string" } },
+        "walls": { "type": "array", "items": { "type": "string" } },
+        "mines": { "type": "array", "items": { "type": "string" } },
+        "minesRevealed": { "type": "boolean" },
+        "logs": { "type": "array", "items": { "type": "object", "properties": { "msg": { "type": "string" }, "time": { "type": "string" } } } },
+        "sprintBlue": { "type": "number" },
+        "sprintRed": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["bluePos", "redPos", "blueRot", "redRot", "blueTokens", "redTokens", "blueTrail", "redTrail", "walls", "mines", "updatedAt"]
+    },
+    "KofiPayment": {
+      "title": "Kofi Payment",
+      "description": "Information on verified Ko-fi webhook payments.",
+      "type": "object",
+      "properties": {
+        "transactionId": { "type": "string" },
+        "name": { "type": "string" },
+        "amount": { "type": "number" },
+        "currency": { "type": "string" },
+        "message": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "type": { "type": "string" },
+        "email": { "type": "string" },
+        "isSubscription": { "type": "boolean" },
+        "claimed": { "type": "boolean" },
+        "claimedBy": { "type": "string" },
+        "claimedAt": { "type": "string" }
+      },
+      "required": ["transactionId", "name", "amount", "claimed"]
+    },
+    "PaypalPayment": {
+      "title": "Paypal Payment",
+      "description": "Information on verified PayPal webhook payments.",
+      "type": "object",
+      "properties": {
+        "transactionId": { "type": "string" },
+        "name": { "type": "string" },
+        "amount": { "type": "number" },
+        "currency": { "type": "string" },
+        "email": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "eventType": { "type": "string" },
+        "claimed": { "type": "boolean" },
+        "claimedBy": { "type": "string" },
+        "claimedAt": { "type": "string" }
+      },
+      "required": ["transactionId", "name", "amount", "claimed"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles."
+    },
+    "/games/{gameId}": {
+      "schema": "GameState",
+      "description": "Shared game sessions."
+    },
+    "/kofi_payments/{transactionId}": {
+      "schema": "KofiPayment",
+      "description": "Incoming Ko-fi payments from webhooks."
+    },
+    "/paypal_payments/{transactionId}": {
+      "schema": "PaypalPayment",
+      "description": "Incoming PayPal payments from webhooks."
+    }
+  }
+}

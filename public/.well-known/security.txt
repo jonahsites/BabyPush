@@ -1,0 +1,4 @@
+Contact: mailto:jadovdav@gmail.com
+Expires: 2027-05-25T13:30:00.000Z
+Preferred-Languages: en
+Canonical: https://baby-puah.vercel.app/.well-known/security.txt

@@ -1,0 +1,30 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 1. Users collection: profiles and credit balances
+    match /users/{userId} {
+      // Allows general read/write access so the clients and the client-sdk server can perform syncs and transactions
+      allow read, write: if true;
+    }
+
+    // 2. Games collection: synchronized real-time game sessions
+    match /games/{gameId} {
+      // Allows gameplay synchronization and updates
+      allow read, write: if true;
+    }
+
+    // 3. Ko-fi Webhook payments collection
+    match /kofi_payments/{transactionId} {
+      // Allows incoming webhooks recording and backend transaction claiming
+      allow read, write: if true;
+    }
+
+    // 4. PayPal Webhook payments collection
+    match /paypal_payments/{transactionId} {
+      // Allows incoming webhooks recording and backend transaction claiming
+      allow read, write: if true;
+    }
+  }
+}
+
