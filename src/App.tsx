@@ -111,12 +111,14 @@ export default function App() {
   const [isSignUp, setIsSignUp] = useState(false);
   const [signUpDisplayName, setSignUpDisplayName] = useState("");
   const [isDevMode, setIsDevMode] = useState(false);
+  const [isAbilitiesExpanded, setIsAbilitiesExpanded] = useState<boolean>(false);
   const [stripeConfig, setStripeConfig] = useState<{ stripeEnabled: boolean, hasSecretKey: boolean } | null>(null);
   const [paymentSuccessMessage, setPaymentSuccessMessage] = useState<string | null>(null);
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [paymentLoading, setPaymentLoading] = useState<boolean>(false);
   const [customTokenAmount, setCustomTokenAmount] = useState<string>("250");
-  const [activePurchaseTab, setActivePurchaseTab] = useState<'paypal' | 'kofi'>('paypal');
+  const [activePurchaseTab, setActivePurchaseTab] = useState<'stripe' | 'paypal' | 'kofi'>('stripe');
+  const [stripeTokenQuantity, setStripeTokenQuantity] = useState<number>(25);
   const [kofiName, setKofiName] = useState("");
   const [kofiTxId, setKofiTxId] = useState("");
   const [kofiAmount, setKofiAmount] = useState<string>("20");
@@ -339,6 +341,109 @@ export default function App() {
       setPaypalTxId("");
     } catch (err: any) {
       console.error("Secure claim-paypal failed:", err);
+      setPaymentError(err.message || String(err));
+    } finally {
+      setPaymentLoading(false);
+    }
+  };
+
+  const handleStripeCheckout = async (tokensCount: number) => {
+    if (!user) {
+      setPaymentError("You must be logged in to buy tokens.");
+      return;
+    }
+
+    // Open a blank new tab immediately on the user's click gesture to bypass popup block regulations
+    const checkoutWindow = window.open("", "_blank");
+    if (checkoutWindow) {
+      checkoutWindow.document.write(`
+        <html>
+          <head>
+            <title>Redirecting to Stripe</title>
+            <style>
+              body {
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                background-color: #fdfaf2;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                align-items: center;
+                height: 100vh;
+                margin: 0;
+                color: #000;
+                text-align: center;
+              }
+              .border-box {
+                border: 4px solid #000;
+                padding: 30px;
+                background: #fff;
+                border-radius: 20px;
+                box-shadow: 6px 6px 0px 0px #000;
+                max-width: 400px;
+              }
+              h2 { text-transform: uppercase; margin-top: 0; margin-bottom: 10px; font-weight: 900; font-size: 1.5rem; }
+              p { font-size: 14px; opacity: 0.8; margin-bottom: 20px; }
+              .spinner {
+                display: inline-block;
+                width: 30px;
+                height: 30px;
+                border: 4px solid rgba(0,0,0,.15);
+                border-radius: 50%;
+                border-top-color: #000;
+                animation: spin 0.8s linear infinite;
+              }
+              @keyframes spin { to { transform: rotate(360deg); } }
+            </style>
+          </head>
+          <body>
+            <div class="border-box">
+              <h2>🔒 Secure Checkout</h2>
+              <p>Preparing Stripe secure payment session...</p>
+              <div class="spinner"></div>
+            </div>
+          </body>
+        </html>
+      `);
+    }
+
+    setPaymentLoading(true);
+    setPaymentError(null);
+    try {
+      const response = await fetch("/api/create-checkout-session", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          tokens: tokensCount,
+          userId: user.uid,
+        }),
+      });
+
+      if (!response.ok) {
+        let errMsg = "Stripe checkout creation failed";
+        try {
+          const errData = await response.json();
+          errMsg = errData.message || errData.error || errMsg;
+        } catch (_) {}
+        throw new Error(errMsg);
+      }
+
+      const data = await response.json();
+      if (data.url) {
+        if (checkoutWindow) {
+          checkoutWindow.location.href = data.url;
+        } else {
+          window.location.href = data.url;
+        }
+      } else {
+        throw new Error("Could not retrieve checkout url");
+      }
+    } catch (err: any) {
+      console.error("Stripe checkout failed:", err);
+      if (checkoutWindow) {
+        checkoutWindow.close();
+      }
       setPaymentError(err.message || String(err));
     } finally {
       setPaymentLoading(false);
@@ -3443,102 +3548,19 @@ export default function App() {
 
         {/* Middle Column: Unified 8 Abilities Deck targeting the currently selected unit */}
         <div className={`flex items-center gap-1.5 transition-all ${!canControl(selectedBabyId) ? 'opacity-30 pointer-events-none grayscale' : ''}`}>
-          <button 
-            onClick={() => setActiveModal({ side: selectedBabySide, type: 'move' })}
-            className="w-11 h-11 flex flex-col items-center justify-center bg-[#3b82f6] border-2 border-black rounded-xl text-white font-black text-[9px] uppercase hover:-translate-y-0.5 active:translate-y-0.5 shadow-[2.5px_2.5px_0px_0px_rgba(0,0,0,1)] cursor-pointer"
-            title="Move pack direct steps"
+          <button
+            type="button"
+            onClick={() => setIsAbilitiesExpanded(true)}
+            className="h-11 px-6 flex items-center gap-2 bg-[#ffde43] hover:bg-[#ffe04d] border-2 border-black rounded-xl text-black font-black text-[11px] uppercase tracking-wider hover:-translate-y-0.5 active:translate-y-0.5 shadow-[2.5px_2.5px_0px_0px_rgba(0,0,0,1)] cursor-pointer select-none transition-all"
+            title="Deploy strategic powers"
+            id="tactical-abilities-menu-btn"
           >
-            <span className="text-base leading-none">💥</span>
-            <span className="text-[6.5px] font-black tracking-tighter mt-0.5">MOVE</span>
+            <span>⚔️</span>
+            <span>Tactical Abilities</span>
+            <span className="text-[9px] bg-black text-[#ffde43] font-mono px-1.5 py-0.5 rounded font-black uppercase tracking-tighter shadow-sm ml-1.5">
+              Menu &bull; {selectedBabySide.toUpperCase()}
+            </span>
           </button>
-          
-          <button 
-            onClick={() => setActiveModal({ side: selectedBabySide, type: 'grid' })}
-            className="w-11 h-11 flex flex-col items-center justify-center bg-blue-100 border-2 border-black rounded-xl text-black font-black text-[9px] uppercase hover:-translate-y-0.5 active:translate-y-0.5 shadow-[2.5px_2.5px_0px_0px_rgba(0,0,0,1)] cursor-pointer"
-            title="Push standard grid segments"
-          >
-            <span className="text-base leading-none">♟️</span>
-            <span className="text-[6.5px] font-black tracking-tighter mt-0.5">GRID</span>
-          </button>
-
-          <button 
-            onClick={() => handleTeleport(selectedBabyId)}
-            className="w-11 h-11 flex flex-col items-center justify-center bg-purple-200 border-2 border-black rounded-xl text-black font-black text-[9px] uppercase hover:-translate-y-0.5 active:translate-y-0.5 shadow-[2.5px_2.5px_0px_0px_rgba(0,0,0,1)] cursor-pointer"
-            title="Teleport baby stroller instantly"
-          >
-            <span className="text-base leading-none">🔮</span>
-            <span className="text-[6.5px] font-black tracking-tighter mt-0.5">TELE</span>
-          </button>
-
-          <button 
-            onClick={() => setActiveModal({ side: selectedBabySide, type: 'wall' })}
-            className="w-11 h-11 flex flex-col items-center justify-center bg-slate-200 border-2 border-black rounded-xl text-black font-black text-[9px] uppercase hover:-translate-y-0.5 active:translate-y-0.5 shadow-[2.5px_2.5px_0px_0px_rgba(0,0,0,1)] cursor-pointer"
-            title="Fortify brick brick build-up blocking lines"
-          >
-            <span className="text-base leading-none">🚧</span>
-            <span className="text-[6.5px] font-black tracking-tighter mt-0.5">WALL</span>
-          </button>
-
-          <button 
-            onClick={() => setActiveModal({ side: selectedBabySide, type: 'mine' })}
-            className="w-11 h-11 flex flex-col items-center justify-center bg-orange-200 border-2 border-black rounded-xl text-black font-black text-[9px] uppercase hover:-translate-y-0.5 active:translate-y-0.5 shadow-[2.5px_2.5px_0px_0px_rgba(0,0,0,1)] cursor-pointer"
-            title="Deploys deep trap minefields in opposition lines"
-          >
-            <span className="text-base leading-none">💣</span>
-            <span className="text-[6.5px] font-black tracking-tighter mt-0.5">MINE</span>
-          </button>
-
-          <button 
-            onClick={() => handleJackpot(selectedBabyId)}
-            className="w-11 h-11 flex flex-col items-center justify-center bg-yellow-250 border-2 border-black rounded-xl text-black font-black text-[9px] uppercase hover:-translate-y-0.5 active:translate-y-0.5 shadow-[2.5px_2.5px_0px_0px_rgba(0,0,0,1)] cursor-pointer"
-            title="Test lucky ticket payouts"
-          >
-            <span className="text-base leading-none">🎰</span>
-            <span className="text-[6.5px] font-black tracking-tighter mt-0.5">LUCK</span>
-          </button>
-
-          <button 
-            onClick={() => handleSprint(selectedBabyId)}
-            className="w-11 h-11 flex flex-col items-center justify-center bg-cyan-200 border-2 border-black rounded-xl text-black font-black text-[9px] uppercase hover:-translate-y-0.5 active:translate-y-0.5 shadow-[2.5px_2.5px_0px_0px_rgba(0,0,0,1)] cursor-pointer"
-            title="Enable fast 2x physical sprint multipliers"
-          >
-            <span className="text-base leading-none">🏃</span>
-            <span className="text-[6.5px] font-black tracking-tighter mt-0.5">RUN</span>
-          </button>
-
-          <button 
-            onClick={() => setActiveModal({ side: selectedBabySide, type: 'slingshot' })}
-            className="w-11 h-11 flex flex-col items-center justify-center bg-rose-200 border-2 border-black rounded-xl text-black font-black text-[9px] uppercase hover:-translate-y-0.5 active:translate-y-0.5 shadow-[2.5px_2.5px_0px_0px_rgba(0,0,0,1)] cursor-pointer animate-pulse"
-            title="Slingshot Baby (Cost: 100 Tokens)"
-          >
-            <span className="text-sm leading-none">🏹</span>
-            <span className="text-[6.5px] font-black tracking-tighter mt-0.5">SLING</span>
-          </button>
-
-          {/* Dynamic Mines Clear / Reclamation on Current unit lanes half */}
-          {selectedSideHasMines && (
-            <div className="flex gap-1 border-l-2 border-dashed border-gray-300 pl-1.5 ml-1">
-              {!selectedSideMinesRevealed ? (
-                <button 
-                  onClick={() => handleRevealMines(selectedBabySide)}
-                  className="w-11 h-11 flex flex-col items-center justify-center bg-amber-200 border-2 border-black rounded-xl text-black font-bold text-[8px] uppercase hover:-translate-y-0.5 active:translate-y-0.5 shadow-[2.5px_2.5px_0px_0px_rgba(0,0,0,1)] cursor-pointer"
-                  title="Reveal mines targeting coordinates (100 Tokens)"
-                >
-                  <span className="text-sm">👁️</span>
-                  <span className="text-[5px] tracking-tight">REVEAL</span>
-                </button>
-              ) : (
-                <button 
-                  onClick={() => handleClearMines(selectedBabySide)}
-                  className="w-11 h-11 flex flex-col items-center justify-center bg-red-200 border-2 border-black rounded-xl text-black font-bold text-[8px] uppercase hover:-translate-y-0.5 active:translate-y-0.5 shadow-[2.5px_2.5px_0px_0px_rgba(0,0,0,1)] cursor-pointer"
-                  title="Clean all detonators on side (150 Tokens)"
-                >
-                  <span className="text-sm">🧹</span>
-                  <span className="text-[5px] tracking-tight">CLEAR</span>
-                </button>
-              )}
-            </div>
-          )}
         </div>
 
         {/* Right Column: Global actions and controls deck */}
@@ -4060,346 +4082,90 @@ export default function App() {
 
             <div className="relative z-10 space-y-4">
               <p className="text-[11px] text-black/75 font-semibold text-center leading-normal max-w-sm mx-auto">
-                Fuel the developers, keep match hosts online, and fund new feature updates! Direct donations are instantly credited.
+                Fuel the developers, keep match hosts online, and fund new feature updates! Tokens are instantly credited.
               </p>
 
-              {/* Purchase Method Toggles */}
-              <div className="flex border-2 border-black rounded-xl overflow-hidden bg-stone-100 p-1 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
+              {/* Stripe Payment Content */}
+              <div className="bg-white border-3 border-black rounded-2xl p-4 sm:p-5 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] text-center space-y-4">
+                <div className="bg-indigo-600 border-2 border-black rounded-xl p-3.5 text-center space-y-1 text-white">
+                  <div className="text-[11px] font-black uppercase tracking-wide text-yellow-300">
+                    ⚡ Stripe Secure Payments
+                  </div>
+                  <div className="text-2xl font-black font-mono leading-none my-1">
+                    $1.00 USD = 1 Token
+                  </div>
+                  <p className="text-[10px] text-indigo-100 font-medium leading-normal max-w-sm mx-auto">
+                    Experience lightning-fast instant credit with zero manual code input! Buy safely with major cards or Apple Pay.
+                  </p>
+                </div>
+
+                {/* Pre-configured Options */}
+                <div className="grid grid-cols-2 gap-2 mt-2">
+                  {[
+                    { tokens: 5, label: "🍼 Starter Pack" },
+                    { tokens: 20, label: "🚀 Cadet Cache", popular: true },
+                    { tokens: 50, label: "⚔️ Warlord Hoard" },
+                    { tokens: 100, label: "👑 Emperor Vault" }
+                  ].map((item) => (
+                    <button
+                      key={item.tokens}
+                      type="button"
+                      onClick={() => setStripeTokenQuantity(item.tokens)}
+                      className={`p-3 border-2 border-black rounded-xl text-left transition-all relative cursor-pointer ${
+                        stripeTokenQuantity === item.tokens
+                          ? 'bg-indigo-50 border-indigo-600 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]'
+                          : 'bg-stone-50 hover:bg-stone-100 shadow-[1px_1px_0px_0px_rgba(0,0,0,1)]'
+                      }`}
+                    >
+                      {item.popular && (
+                        <span className="absolute -top-2 right-2 bg-rose-500 text-white text-[7px] font-black uppercase px-1 py-0.5 rounded border border-black shadow-[1px_1px_0px_0px_rgba(0,0,0,1)]">
+                          POPULAR
+                        </span>
+                      )}
+                      <div className="text-[10px] font-black uppercase text-black/70 mb-0.5">{item.label}</div>
+                      <div className="text-sm font-black text-black">{item.tokens} Tokens</div>
+                      <div className="text-[9px] font-mono text-black/60 font-bold">${item.tokens}.00 USD</div>
+                    </button>
+                  ))}
+                </div>
+
+                {/* Custom Quantity */}
+                <div className="bg-stone-50 border-2 border-black p-3 rounded-xl text-left shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
+                  <label className="text-[9px] font-black uppercase tracking-wide text-black/75 block mb-1 font-sans">
+                    Or enter custom amount (tokens):
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="number"
+                      min="1"
+                      max="10000"
+                      value={stripeTokenQuantity || ""}
+                      onChange={(e) => setStripeTokenQuantity(Math.max(1, Math.min(10000, parseInt(e.target.value) || 0)))}
+                      className="flex-1 bg-white border-2 border-black py-2 px-3 rounded-lg font-bold text-xs outline-none text-black placeholder:text-black/30"
+                      placeholder="e.g. 15"
+                    />
+                    <div className="bg-stone-100 border-2 border-black px-3.5 py-1.5 rounded-lg flex items-center justify-center font-bold text-xs font-mono text-black">
+                      ${stripeTokenQuantity || 0}.00 USD
+                    </div>
+                  </div>
+                </div>
+
+                {/* Checkout CTA */}
                 <button
                   type="button"
-                  onClick={() => setActivePurchaseTab('paypal')}
-                  className={`flex-1 py-1.5 text-center text-[10px] font-black uppercase tracking-wider rounded-lg transition-all ${
-                    activePurchaseTab === 'paypal'
-                      ? 'bg-yellow-300 text-black border-2 border-black shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] font-black'
-                      : 'text-black/60 hover:text-black font-black'
+                  onClick={() => handleStripeCheckout(stripeTokenQuantity)}
+                  disabled={paymentLoading || !stripeTokenQuantity || stripeTokenQuantity <= 0}
+                  className={`w-full py-3.5 text-center bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs border-3 border-black rounded-xl hover:-translate-y-0.5 active:translate-y-0.5 transition-all block uppercase shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] cursor-pointer ${
+                    (paymentLoading || !stripeTokenQuantity) ? 'opacity-55 cursor-not-allowed' : ''
                   }`}
                 >
-                  💳 PayPal / Venmo (New)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActivePurchaseTab('kofi')}
-                  className={`flex-1 py-1.5 text-center text-[10px] font-black uppercase tracking-wider rounded-lg transition-all ${
-                    activePurchaseTab === 'kofi'
-                      ? 'bg-[#FF5E5B] text-white border-2 border-black shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] font-black'
-                      : 'text-black/60 hover:text-black font-black'
-                  }`}
-                >
-                  ☕ Ko-fi Checkout
+                  {paymentLoading ? (
+                    <span className="flex items-center justify-center gap-2">🌀 Directing to Stripe Secure Portal...</span>
+                  ) : (
+                    <span>💳 Secure Checkout with Stripe &rarr;</span>
+                  )}
                 </button>
               </div>
-
-              {activePurchaseTab === 'paypal' ? (
-                <>
-                  {/* PayPal Rate Info & Checkout Button */}
-                  <div className="bg-white border-3 border-black rounded-2xl p-4 sm:p-5 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] text-center space-y-4">
-                    <div className="bg-yellow-50 border border-yellow-200/60 rounded-xl p-3.5 text-center space-y-1">
-                      <div className="text-[11px] font-black uppercase text-yellow-800 tracking-wide">
-                        💝 Support Conversion Rate
-                      </div>
-                      <div className="text-xl font-black text-black font-sans leading-none my-1 font-mono">
-                        $1.00 USD = 1 Token
-                      </div>
-                      <p className="text-[9px] text-black/65 font-medium leading-normal max-w-sm mx-auto">
-                        Support any amount you wish! The server automatically processes your support value into game tokens instantly (e.g. <strong className="text-yellow-600 font-extrabold">$20 = 20 Tokens</strong>).
-                      </p>
-                    </div>
-
-                    {/* Render standard PayPal script/container */}
-                    <div className="py-2">
-                      <PayPalButton />
-                    </div>
-                  </div>
-
-                  {/* Secure PayPal Claim Station */}
-                  <div className="bg-yellow-101/50 border-3 border-black rounded-2xl p-4 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]">
-                    <h4 className="text-[11px] font-black uppercase tracking-wider text-black mb-1 flex items-center justify-center gap-1.5">
-                      🛡️ Secure Auto-Verification & Instant Token Credit
-                    </h4>
-                    <p className="text-[9px] text-black/65 font-medium mb-3.5 text-center leading-relaxed">
-                      Paid via our PayPal checkout? Enter your <strong>PayPal Transaction ID or Order Code</strong> (e.g. from receipt screen/email) below to claim immediately!
-                    </p>
-
-                    <div className="space-y-3">
-                      <div className="bg-white border-2 border-black p-3.5 rounded-xl text-left shadow-[1.5px_1.5px_0px_0px_rgba(0,0,0,1)]">
-                        <label className="text-[8.5px] font-black uppercase tracking-wide text-black/75 block mb-1.5 font-sans">
-                          Enter PayPal Transaction ID or Order Code
-                        </label>
-                        <div className="flex flex-col sm:flex-row gap-2">
-                          <input 
-                            type="text"
-                            value={paypalTxId}
-                            onChange={(e) => setPaypalTxId(e.target.value)}
-                            className="flex-1 bg-white border-2 border-black py-2 px-3 rounded-lg font-bold text-xs outline-none text-black placeholder:text-black/30"
-                            placeholder="e.g. 47F5ZGZM4R5SC or email receipt ID"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => creditPaypalDonation(paypalTxId, user?.email === "jadovdav@gmail.com" ? devClaimAmount : undefined)}
-                            disabled={paymentLoading || !paypalTxId.trim()}
-                            className={`sm:w-auto px-5 py-2 bg-yellow-400 hover:bg-yellow-500 text-black font-black border-2 border-black rounded-lg text-xs uppercase cursor-pointer text-center shadow-[1.5px_1.5px_0px_0px_rgba(0,0,0,1)] hover:-translate-y-0.5 active:translate-y-0.5 transition-all flex items-center justify-center gap-1.5 min-w-[140px] ${(!paypalTxId.trim() || paymentLoading) ? 'opacity-55 cursor-not-allowed' : ''}`}
-                          >
-                            {paymentLoading ? (
-                              <>🌀 Verifying...</>
-                            ) : (
-                              <>💳 Claim Now</>
-                            )}
-                          </button>
-                        </div>
-
-                        {user?.email === "jadovdav@gmail.com" && (
-                          <div className="mt-4 pt-3 border-t-2 border-black/15 bg-amber-50/60 p-3 rounded-lg border border-black space-y-2 text-left">
-                            <div className="flex items-center gap-1.5 text-[9.5px] font-black text-amber-900 uppercase">
-                              ⚙️ Developer Sandbox Self-Approve
-                            </div>
-                            <p className="text-[8.5px] text-stone-700 font-bold leading-normal">
-                              Since you are logged in as the App's Creator (<strong>jadovdav@gmail.com</strong>), you can bypass live webhook waiting or configuration rules. Select your mock amount or enter a custom amount to credit immediately:
-                            </p>
-                            <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                              {[5, 10, 25, 50, 100].map((amt) => (
-                                <button
-                                  key={amt}
-                                  type="button"
-                                  onClick={() => setDevClaimAmount(amt)}
-                                  className={`px-2 py-1 text-[9px] font-black border-2 border-black rounded-md transition-all ${
-                                    devClaimAmount === amt
-                                      ? "bg-amber-400 text-black shadow-[1px_1px_0px_0px_rgba(0,0,0,1)]"
-                                      : "bg-white text-stone-600 hover:bg-stone-50"
-                                  }`}
-                                >
-                                  ${amt}.00
-                                </button>
-                              ))}
-                              
-                              <div className="flex items-center gap-1.5 pl-2.5 ml-1 border-l border-dashed border-black/20">
-                                <span className="text-[8.5px] text-stone-700 font-black">Custom: $</span>
-                                <input
-                                  type="number"
-                                  min="1"
-                                  step="0.01"
-                                  value={devClaimAmount}
-                                  onChange={(e) => setDevClaimAmount(Math.max(0.01, parseFloat(e.target.value) || 0))}
-                                  className="w-16 px-1 py-0.5 bg-white border border-black rounded text-[9px] text-black font-mono font-bold outline-none"
-                                />
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const targetId = paypalTxId.trim() || `DEV_PAY_RECPT_${Date.now()}`;
-                                creditPaypalDonation(targetId, devClaimAmount);
-                              }}
-                              disabled={paymentLoading}
-                              className="w-full py-1.5 px-3 bg-amber-500 hover:bg-amber-600 active:translate-y-0.5 border-2 border-black rounded-lg text-[9px] font-black uppercase text-black text-center transition-all shadow-[1.5px_1.5px_0px_0px_rgba(0,0,0,1)]"
-                            >
-                              🚀 Force Claim & credit {Math.floor(devClaimAmount)} Tokens
-                            </button>
-                          </div>
-                        )}
-                        
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mt-2 pt-2 border-t border-dashed border-black/10">
-                          <p className="text-[7.5px] text-black/50 font-bold uppercase tracking-wide">
-                            🔒 Validated via official PayPal Webhook. Prevents double-claiming.
-                          </p>
-                          
-                          <button 
-                            type="button"
-                            onClick={() => setShowPaypalGuide(!showPaypalGuide)}
-                            className="text-[8px] font-black text-rose-600 hover:text-rose-700 underline cursor-pointer uppercase flex items-center gap-1"
-                          >
-                            {showPaypalGuide ? "💡 Hide Guide" : "💡 Where's my Receipt Code?"}
-                          </button>
-                        </div>
-
-                        <AnimatePresence>
-                          {showPaypalGuide && (
-                            <motion.div 
-                              initial={{ opacity: 0, height: 0 }}
-                              animate={{ opacity: 1, height: "auto" }}
-                              exit={{ opacity: 0, height: 0 }}
-                              className="bg-stone-50 border-2 border-black rounded-xl p-3 text-left space-y-3 mt-3 overflow-hidden"
-                            >
-                              <div className="bg-yellow-50 border-2 border-yellow-300 rounded-xl p-3 space-y-1.5">
-                                <h5 className="text-[9.5px] font-black uppercase text-yellow-950 flex items-center gap-1">
-                                  ❤️ 1. Direct Server Support Contribution
-                                </h5>
-                                <p className="text-[8.5px] text-black/80 font-bold leading-relaxed">
-                                  PayPal support options directly sustain baby server operations and database clusters. To express our gratitude, the grid credits <strong>1 Token per $1.00 USD supported</strong> immediately.
-                                </p>
-                              </div>
-
-                              <h5 className="text-[9px] font-black uppercase text-black border-b border-black/10 pt-1 pb-1 flex items-center gap-1">
-                                📋 2. How to Retrieve Your Receipt Code
-                              </h5>
-                              <p className="text-[8px] text-black/70 leading-relaxed font-semibold">
-                                - Right after payment, look for the unique <strong>Capture / Transaction ID</strong> shown on the transaction details page.<br/>
-                                - You will also receive an official email confirmation from PayPal listing this Receipt ID.<br/>
-                                - Simply paste that ID in the verify box above, and your tokens will credit instantly!
-                              </p>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </div>
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <>
-                  {/* Ko-fi Rate Info & Checkout Button */}
-                  <div className="bg-white border-3 border-black rounded-2xl p-4 sm:p-5 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] text-center space-y-4">
-                    <div className="bg-rose-50 border border-rose-200/60 rounded-xl p-3.5 text-center space-y-1">
-                      <div className="text-[11px] font-black uppercase text-[#FF5E5B] tracking-wide">
-                        💝 Support Conversion Rate
-                      </div>
-                      <div className="text-xl font-black text-black font-sans leading-none my-1 font-mono">
-                        $1.00 USD = 1 Token
-                      </div>
-                      <p className="text-[9px] text-black/65 font-medium leading-normal max-w-sm mx-auto">
-                        Support any amount you wish! The server automatically processes your donation value into game credits (e.g., <strong className="text-rose-600">20 Tokens</strong> on a $20 support).
-                      </p>
-                    </div>
-
-                    <a 
-                      href="https://ko-fi.com/s/848c7dd1b4"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="w-full py-3.5 text-center bg-[#FF5E5B] hover:bg-[#ff4a47] text-white font-black text-[11px] border-3 border-black rounded-xl hover:-translate-y-0.5 active:translate-y-0.5 transition-all block uppercase shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]"
-                    >
-                      ☕ SUPPORT SEAMLESSLY ON KO-FI &rarr;
-                    </a>
-                  </div>
-
-                  {/* Secure Claim Station */}
-                  <div className="bg-yellow-101/50 border-3 border-black rounded-2xl p-4 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]">
-                    <h4 className="text-[11px] font-black uppercase tracking-wider text-black mb-1 flex items-center justify-center gap-1.5">
-                      🛡️ Secure Auto-Verification & Instantly Credit Any Custom Amount
-                    </h4>
-                    <p className="text-[9px] text-black/65 font-medium mb-3.5 text-center leading-relaxed">
-                      Support any amount via the checkout button. Once paid, simply enter your <strong>Receipt / Transaction ID</strong> below to claim your tokens immediately!
-                    </p>
-
-                    <div className="space-y-3">
-                      <div className="bg-white border-2 border-black p-3.5 rounded-xl text-left shadow-[1.5px_1.5px_0px_0px_rgba(0,0,0,1)]">
-                        <label className="text-[8.5px] font-black uppercase tracking-wide text-black/75 block mb-1.5 font-sans">
-                          Enter Ko-fi Transaction ID / Receipt Code
-                        </label>
-                        <div className="flex flex-col sm:flex-row gap-2">
-                          <input 
-                            type="text"
-                            value={kofiTxId}
-                            onChange={(e) => setKofiTxId(e.target.value)}
-                            className="flex-1 bg-white border-2 border-black py-2 px-3 rounded-lg font-bold text-xs outline-none text-black placeholder:text-black/30"
-                            placeholder="e.g. kofi-1a2b3c (as shown on your email receipt)"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => creditKofiDonation(0, "", kofiTxId, user?.email === "jadovdav@gmail.com" ? devClaimAmount : undefined)}
-                            disabled={paymentLoading || !kofiTxId.trim()}
-                            className={`sm:w-auto px-5 py-2 bg-[#FF5E5B] text-white font-black border-2 border-black rounded-lg text-xs uppercase cursor-pointer text-center shadow-[1.5px_1.5px_0px_0px_rgba(0,0,0,1)] hover:-translate-y-0.5 active:translate-y-0.5 transition-all flex items-center justify-center gap-1.5 min-w-[140px] flex-shrink-0 ${(!kofiTxId.trim() || paymentLoading) ? 'opacity-55 cursor-not-allowed' : ''}`}
-                          >
-                            {paymentLoading ? (
-                              <>🌀 Verifying...</>
-                            ) : (
-                              <>☕ Claim Now</>
-                            )}
-                          </button>
-                        </div>
-
-                        {user?.email === "jadovdav@gmail.com" && (
-                          <div className="mt-4 pt-3 border-t-2 border-black/15 bg-rose-50/60 p-3 rounded-lg border border-black space-y-2 text-left">
-                            <div className="flex items-center gap-1.5 text-[9.5px] font-black text-rose-900 uppercase">
-                              ⚙️ Developer Sandbox Self-Approve
-                            </div>
-                            <p className="text-[8.5px] text-stone-700 font-bold leading-normal">
-                              Since you are logged in as the App's Creator (<strong>jadovdav@gmail.com</strong>), you can bypass live webhook waiting or configuration rules. Select your mock amount or enter a custom amount to credit immediately:
-                            </p>
-                            <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                              {[5, 10, 25, 50, 100].map((amt) => (
-                                <button
-                                  key={amt}
-                                  type="button"
-                                  onClick={() => setDevClaimAmount(amt)}
-                                  className={`px-2 py-1 text-[9px] font-black border-2 border-black rounded-md transition-all ${
-                                    devClaimAmount === amt
-                                      ? "bg-rose-400 text-black shadow-[1px_1px_0px_0px_rgba(0,0,0,1)]"
-                                      : "bg-white text-stone-600 hover:bg-stone-50"
-                                  }`}
-                                >
-                                  ${amt}.00
-                                </button>
-                              ))}
-
-                              <div className="flex items-center gap-1.5 pl-2.5 ml-1 border-l border-dashed border-black/20">
-                                <span className="text-[8.5px] text-stone-700 font-black">Custom: $</span>
-                                <input
-                                  type="number"
-                                  min="1"
-                                  step="0.01"
-                                  value={devClaimAmount}
-                                  onChange={(e) => setDevClaimAmount(Math.max(0.01, parseFloat(e.target.value) || 0))}
-                                  className="w-16 px-1 py-0.5 bg-white border border-black rounded text-[9px] text-black font-mono font-bold outline-none"
-                                />
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const targetId = kofiTxId.trim() || `DEV_KOFI_RECPT_${Date.now()}`;
-                                creditKofiDonation(0, "", targetId, devClaimAmount);
-                              }}
-                              disabled={paymentLoading}
-                              className="w-full py-1.5 px-3 bg-[#FF5E5B] hover:bg-[#ff4e4b] active:translate-y-0.5 border-2 border-black rounded-lg text-[9px] font-black uppercase text-white text-center transition-all shadow-[1.5px_1.5px_0px_0px_rgba(0,0,0,1)]"
-                            >
-                              ☕ Force Claim & credit {Math.floor(devClaimAmount)} Tokens
-                            </button>
-                          </div>
-                        )}
-                        
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mt-2 pt-2 border-t border-dashed border-black/10">
-                          <p className="text-[7.5px] text-black/50 font-bold uppercase tracking-wide">
-                            🔒 Validated via official Ko-fi Webhook. Prevents double-claiming.
-                          </p>
-                          
-                          <button 
-                            type="button"
-                            onClick={() => setShowKofiGuide(!showKofiGuide)}
-                            className="text-[8px] font-black text-rose-600 hover:text-rose-700 underline cursor-pointer uppercase flex items-center gap-1"
-                          >
-                            {showKofiGuide ? "💡 Hide Guide" : "💡 How does this work? (Important Payment/Code Guide)"}
-                          </button>
-                        </div>
-
-                        <AnimatePresence>
-                          {showKofiGuide && (
-                            <motion.div 
-                              initial={{ opacity: 0, height: 0 }}
-                              animate={{ opacity: 1, height: "auto" }}
-                              exit={{ opacity: 0, height: 0 }}
-                              className="bg-stone-50 border-2 border-black rounded-xl p-3 text-left space-y-3 mt-3 overflow-hidden"
-                            >
-                              <div className="bg-rose-50 border-2 border-rose-300 rounded-xl p-3 space-y-1.5">
-                                <h5 className="text-[9.5px] font-black uppercase text-rose-750 flex items-center gap-1">
-                                  ❤️ 1. Your Support is a Direct Donation to the Server & Charity
-                                </h5>
-                                <p className="text-[8.5px] text-black/80 font-bold leading-relaxed">
-                                  When you click the checkout button above, you are making a <strong className="text-rose-700 font-extrabold font-sans">direct donation</strong> to support server upkeeps and features. To say thanks, our system awards <strong>1 Game Token for every $1.00 USD donated</strong>.
-                                </p>
-                              </div>
-
-                              <h5 className="text-[9px] font-black uppercase text-black border-b border-black/10 pt-1 pb-1 flex items-center gap-1">
-                                📋 2. How to Retrieve Your Receipt Code
-                              </h5>
-                              <p className="text-[8px] text-black/80 font-bold leading-relaxed">
-                                Look for the unique Receipt ID (e.g. kofi-xxxx) on your transaction complete receipt or checkout thank success screen, and paste it here!
-                              </p>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </div>
-                    </div>
-                  </div>
-                </>
-              )}
             </div>
 
             <div className="text-center mt-5">
@@ -4408,6 +4174,291 @@ export default function App() {
                 className="text-black/50 hover:text-black font-black text-[9px] uppercase tracking-wider underline cursor-pointer"
               >
                 Close & Return to Battle
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Tactical Abilities Popup Modal (Desktop Compact & Clean Overlays) */}
+      {isAbilitiesExpanded && (
+        <div className="fixed inset-0 z-[410] flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 text-black font-sans">
+          <motion.div
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="w-full max-w-2xl bg-[#fefdfa] border-4 border-black rounded-3xl p-6 sm:p-8 relative shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] max-h-[90vh] overflow-y-auto z-[420]"
+          >
+            {/* Design effects inside the modal (Grid background for beautiful brutalist texture) */}
+            <div className="absolute inset-0 pointer-events-none opacity-[0.05]" style={{
+              backgroundImage: 'radial-gradient(#000000 8%, transparent 8%)',
+              backgroundSize: '16px 16px'
+            }} />
+
+            {/* Absolute close button */}
+            <button
+              onClick={() => setIsAbilitiesExpanded(false)}
+              className="absolute top-4 right-4 w-9 h-9 border-3 border-black rounded-xl bg-orange-400 text-black font-black hover:bg-orange-500 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:-translate-y-0.5 active:translate-y-0.5 transition-all text-sm flex items-center justify-center cursor-pointer z-[50]"
+            >
+              ✕
+            </button>
+
+            {/* Header */}
+            <div className="relative z-10 text-center mb-6">
+              <span className="text-[9px] bg-black text-[#ffde43] font-mono px-2 py-0.5 rounded-sm uppercase font-black tracking-widest border border-black">
+                Tactical Division Center
+              </span>
+              <h2 className="text-2xl sm:text-3xl font-black uppercase text-black mt-2 tracking-tight">
+                ⚔️ Tactical Abilities Menu
+              </h2>
+              <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-[#eae6dc] border-2 border-black rounded-xl text-[10px] font-black font-mono">
+                  <span>Target Unit:</span>
+                  <span className="bg-white border border-black px-1.5 py-0.2 rounded text-indigo-700">
+                    {sponsoredBabies.find(b => b.id === selectedBabyId) ? `👶 ${sponsoredBabies.find(b => b.id === selectedBabyId)?.name}` : (selectedBabySide === 'blue' ? '🔵 Blue Stroller' : '🔴 Red Stroller')}
+                  </span>
+                </div>
+                
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 border-2 border-black rounded-xl text-[10px] font-black font-mono">
+                  <span>Balance:</span>
+                  <span className="bg-emerald-200 border border-emerald-500 px-1.5 py-0.2 rounded">
+                    🪙 {profile?.currentTokens ?? 0} Tokens
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Grid of abilities */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 relative z-10">
+              {/* 1. MOVE */}
+              <button
+                onClick={() => {
+                  setIsAbilitiesExpanded(false);
+                  setActiveModal({ side: selectedBabySide, type: 'move' });
+                }}
+                className="flex items-center gap-3 p-3 bg-blue-50 border-2 border-black rounded-2xl text-left hover:-translate-y-0.5 active:translate-y-0.5 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] hover:shadow-[4.5px_4.5px_0px_0px_rgba(0,0,0,1)] hover:bg-blue-100 transition-all cursor-pointer group"
+              >
+                <span className="w-11 h-11 shrink-0 flex items-center justify-center rounded-xl bg-blue-500 border-2 border-black text-xl text-white shadow-[1.5px_1.5px_0px_0px_rgba(0,0,0,1)]">
+                  💥
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black uppercase tracking-wide group-hover:text-blue-700">Move Step</span>
+                    <span className="text-[9px] bg-black text-white font-mono font-bold px-1 py-0.2 rounded">1 T/Step</span>
+                  </div>
+                  <p className="text-[10px] text-black/75 font-medium leading-tight mt-1">
+                    Increment or decrement direct coordinates. Perfect for quick precise alignments.
+                  </p>
+                </div>
+              </button>
+
+              {/* 2. GRID */}
+              <button
+                onClick={() => {
+                  setIsAbilitiesExpanded(false);
+                  setActiveModal({ side: selectedBabySide, type: 'grid' });
+                }}
+                className="flex items-center gap-3 p-3 bg-stone-50 border-2 border-black rounded-2xl text-left hover:-translate-y-0.5 active:translate-y-0.5 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] hover:shadow-[4.5px_4.5px_0px_0px_rgba(0,0,0,1)] hover:bg-stone-100 transition-all cursor-pointer group"
+              >
+                <span className="w-11 h-11 shrink-0 flex items-center justify-center rounded-xl bg-blue-100 border-2 border-black text-xl text-black shadow-[1.5px_1.5px_0px_0px_rgba(0,0,0,1)]">
+                  ♟️
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black uppercase tracking-wide group-hover:text-amber-700">Push Grid</span>
+                    <span className="text-[9px] bg-black text-white font-mono font-bold px-1 py-0.2 rounded">2 T/Seg</span>
+                  </div>
+                  <p className="text-[10px] text-black/75 font-medium leading-tight mt-1">
+                    Push standard coordinate segments horizontally/vertically to maneuver obstacles.
+                  </p>
+                </div>
+              </button>
+
+              {/* 3. TELE */}
+              <button
+                onClick={() => {
+                  setIsAbilitiesExpanded(false);
+                  handleTeleport(selectedBabyId);
+                }}
+                className="flex items-center gap-3 p-3 bg-purple-50 border-2 border-black rounded-2xl text-left hover:-translate-y-0.5 active:translate-y-0.5 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] hover:shadow-[4.5px_4.5px_0px_0px_rgba(0,0,0,1)] hover:bg-purple-100 transition-all cursor-pointer group"
+              >
+                <span className="w-11 h-11 shrink-0 flex items-center justify-center rounded-xl bg-purple-200 border-2 border-black text-xl text-black shadow-[1.5px_1.5px_0px_0px_rgba(0,0,0,1)]">
+                  🔮
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black uppercase tracking-wide group-hover:text-purple-700">Teleport</span>
+                    <span className="text-[9px] bg-purple-600 text-white font-mono font-bold px-1 py-0.2 rounded">5 Tokens</span>
+                  </div>
+                  <p className="text-[10px] text-black/75 font-medium leading-tight mt-1">
+                    Instantly warp targeted baby stroller into a random safe location zone.
+                  </p>
+                </div>
+              </button>
+
+              {/* 4. WALL */}
+              <button
+                onClick={() => {
+                  setIsAbilitiesExpanded(false);
+                  setActiveModal({ side: selectedBabySide, type: 'wall' });
+                }}
+                className="flex items-center gap-3 p-3 bg-[#fdfdfc] border-2 border-black rounded-2xl text-left hover:-translate-y-0.5 active:translate-y-0.5 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] hover:shadow-[4.5px_4.5px_0px_0px_rgba(0,0,0,1)] hover:bg-slate-100 transition-all cursor-pointer group"
+              >
+                <span className="w-11 h-11 shrink-0 flex items-center justify-center rounded-xl bg-slate-200 border-2 border-black text-xl text-black shadow-[1.5px_1.5px_0px_0px_rgba(0,0,0,1)]">
+                  🚧
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black uppercase tracking-wide group-hover:text-slate-700">Erect Wall</span>
+                    <span className="text-[9px] bg-black text-white font-mono font-bold px-1 py-0.2 rounded">2 T/Pixel</span>
+                  </div>
+                  <p className="text-[10px] text-black/75 font-medium leading-tight mt-1">
+                    Build protective concrete brick blocks on arena lines to block rivals.
+                  </p>
+                </div>
+              </button>
+
+              {/* 5. MINE */}
+              <button
+                onClick={() => {
+                  setIsAbilitiesExpanded(false);
+                  setActiveModal({ side: selectedBabySide, type: 'mine' });
+                }}
+                className="flex items-center gap-3 p-3 bg-orange-50 border-2 border-black rounded-2xl text-left hover:-translate-y-0.5 active:translate-y-0.5 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] hover:shadow-[4.5px_4.5px_0px_0px_rgba(0,0,0,1)] hover:bg-orange-100 transition-all cursor-pointer group"
+              >
+                <span className="w-11 h-11 shrink-0 flex items-center justify-center rounded-xl bg-orange-200 border-2 border-black text-xl text-black shadow-[1.5px_1.5px_0px_0px_rgba(0,0,0,1)]">
+                  💣
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black uppercase tracking-wide group-hover:text-amber-700">Deploy Mines</span>
+                    <span className="text-[9px] bg-orange-600 text-white font-mono font-bold px-1 py-0.2 rounded">20 Tokens</span>
+                  </div>
+                  <p className="text-[10px] text-black/75 font-medium leading-tight mt-1">
+                    Seed 20 invisible anti-personnel trap detonators on opposing player's lanes.
+                  </p>
+                </div>
+              </button>
+
+              {/* 6. LUCK */}
+              <button
+                onClick={() => {
+                  setIsAbilitiesExpanded(false);
+                  handleJackpot(selectedBabyId);
+                }}
+                className="flex items-center gap-3 p-3 bg-yellow-50 border-2 border-black rounded-2xl text-left hover:-translate-y-0.5 active:translate-y-0.5 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] hover:shadow-[4.5px_4.5px_0px_0px_rgba(0,0,0,1)] hover:bg-yellow-101 transition-all cursor-pointer group"
+              >
+                <span className="w-11 h-11 shrink-0 flex items-center justify-center rounded-xl bg-yellow-250 border-2 border-black text-xl text-black shadow-[1.5px_1.5px_0px_0px_rgba(0,0,0,1)]">
+                  🎰
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black uppercase tracking-wide group-hover:text-yellow-700">Jackpot Spin</span>
+                    <span className="text-[9px] bg-yellow-600 text-black font-mono font-bold px-1 py-0.2 rounded">10 Tokens</span>
+                  </div>
+                  <p className="text-[10px] text-black/75 font-medium leading-tight mt-1">
+                    Spin active mechanical outcome wheel for a random package prize.
+                  </p>
+                </div>
+              </button>
+
+              {/* 7. RUN */}
+              <button
+                onClick={() => {
+                  setIsAbilitiesExpanded(false);
+                  handleSprint(selectedBabyId);
+                }}
+                className="flex items-center gap-3 p-3 bg-cyan-50 border-2 border-black rounded-2xl text-left hover:-translate-y-0.5 active:translate-y-0.5 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] hover:shadow-[4.5px_4.5px_0px_0px_rgba(0,0,0,1)] hover:bg-cyan-100 transition-all cursor-pointer group"
+              >
+                <span className="w-11 h-11 shrink-0 flex items-center justify-center rounded-xl bg-cyan-200 border-2 border-black text-xl text-black shadow-[1.5px_1.5px_0px_0px_rgba(0,0,0,1)]">
+                  🏃
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black uppercase tracking-wide group-hover:text-cyan-700">Sprint Mode</span>
+                    <span className="text-[9px] bg-cyan-600 text-white font-mono font-bold px-1 py-0.2 rounded">10 Tokens</span>
+                  </div>
+                  <p className="text-[10px] text-black/75 font-medium leading-tight mt-1">
+                    Unleash speedy 2x physical step rate acceleration for 30 seconds instantly.
+                  </p>
+                </div>
+              </button>
+
+              {/* 8. SLINGSHOT */}
+              <button
+                onClick={() => {
+                  setIsAbilitiesExpanded(false);
+                  setActiveModal({ side: selectedBabySide, type: 'slingshot' });
+                }}
+                className="flex items-center gap-3 p-3 bg-rose-50 border-2 border-black rounded-2xl text-left hover:-translate-y-0.5 active:translate-y-0.5 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] hover:shadow-[4.5px_4.5px_0px_0px_rgba(0,0,0,1)] hover:bg-rose-100 transition-all cursor-pointer group animate-pulse"
+              >
+                <span className="w-11 h-11 shrink-0 flex items-center justify-center rounded-xl bg-rose-200 border-2 border-black text-xl text-black shadow-[1.5px_1.5px_0px_0px_rgba(0,0,0,1)]">
+                  🏹
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black uppercase tracking-wide group-hover:text-rose-700">Slingshot</span>
+                    <span className="text-[9px] bg-rose-600 text-white font-mono font-bold px-1 py-0.2 rounded">100 Tokens</span>
+                  </div>
+                  <p className="text-[10px] text-black/75 font-medium leading-tight mt-1">
+                    Catapult targeted unit stroller clear of high density chokepoints.
+                  </p>
+                </div>
+              </button>
+            </div>
+
+            {/* Mine Hazards Action Board, clean integration inside the popup */}
+            {selectedSideHasMines && (
+              <div className="mt-5 border-t-2 border-neutral-200 pt-5 relative z-10">
+                <div className="bg-amber-50 border-2 border-[#eab308] rounded-2xl p-4 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
+                  <div className="flex items-center gap-2 mb-2 text-amber-900">
+                    <span className="text-lg">📢</span>
+                    <h4 className="text-xs font-black uppercase tracking-wider font-sans text-rose-700">
+                      Territorial Hazard Sweeper Required
+                    </h4>
+                  </div>
+                  <p className="text-[10px] text-amber-900 font-medium mb-3 leading-normal">
+                    Adversary mine detonators are active inside your segment zone coords! Run scans to clear them safely:
+                  </p>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {!selectedSideMinesRevealed ? (
+                      <button
+                        onClick={() => {
+                          setIsAbilitiesExpanded(false);
+                          handleRevealMines(selectedBabySide);
+                        }}
+                        className="flex items-center justify-center gap-2 py-2.5 bg-amber-200 hover:bg-amber-300 text-black border-2 border-black rounded-xl text-[11px] font-black uppercase hover:-translate-y-0.5 active:translate-y-0.5 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] cursor-pointer"
+                      >
+                        <span>👁️ Reveal Mines</span>
+                        <span className="text-[9px] bg-black text-amber-200 px-1.5 py-0.5 rounded font-black font-mono">100 T</span>
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          setIsAbilitiesExpanded(false);
+                          handleClearMines(selectedBabySide);
+                        }}
+                        className="flex items-center justify-center gap-2 py-2.5 bg-red-200 hover:bg-red-300 text-black border-2 border-black rounded-xl text-[11px] font-black uppercase hover:-translate-y-0.5 active:translate-y-0.5 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] cursor-pointer animate-pulse"
+                      >
+                        <span>🧹 Sweep & Clean side</span>
+                        <span className="text-[9px] bg-black text-red-200 px-1.5 py-0.5 rounded font-black font-mono">150 T</span>
+                      </button>
+                    )}
+                    <div className="flex items-center justify-center text-[9px] font-mono text-black/50 font-bold p-1 text-center sm:text-left leading-tight">
+                      ℹ️ Scans make mine pixels visible before executing reclaim procedures.
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Bottom Bar Close */}
+            <div className="mt-6 flex justify-end gap-3 border-t border-neutral-100 pt-5 relative z-10">
+              <button
+                onClick={() => setIsAbilitiesExpanded(false)}
+                className="px-5 py-2.5 bg-[#eae6dc] hover:bg-[#dedad0] text-black border-2 border-black rounded-xl text-xs font-black uppercase hover:-translate-y-0.5 active:translate-y-0.5 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] cursor-pointer transition-all"
+              >
+                Cancel &bull; Close
               </button>
             </div>
           </motion.div>
