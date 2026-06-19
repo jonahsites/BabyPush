@@ -551,7 +551,11 @@ export default function App() {
           await updateDoc(userRef, {
             currentTokens: increment(data.tokens)
           });
-          setPaymentSuccessMessage(`Refilled ${data.tokens} tokens successfully! Your direct contribution has been logged for global humanitarian aid.`);
+          if (data.isSandbox) {
+            setPaymentSuccessMessage(`⚙️ Sandbox Refill: Successfully simulated refilling ${data.tokens} tokens! [Stripe environment variable is not configured on Vercel yet, so Sandbox Mode was automatically activated]`);
+          } else {
+            setPaymentSuccessMessage(`Refilled ${data.tokens} tokens successfully! Your direct contribution has been logged for global humanitarian aid.`);
+          }
           // Clean up URL
           window.history.replaceState({}, document.title, "/");
         }
