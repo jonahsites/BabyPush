@@ -347,6 +347,109 @@ export default function App() {
     }
   };
 
+  const handlePaypalCheckout = async (tokensCount: number) => {
+    if (!user) {
+      setPaymentError("You must be logged in to buy tokens.");
+      return;
+    }
+
+    // Open a blank new tab immediately on the user's click gesture to bypass popup block regulations
+    const checkoutWindow = window.open("", "_blank");
+    if (checkoutWindow) {
+      checkoutWindow.document.write(`
+        <html>
+          <head>
+            <title>Redirecting to PayPal</title>
+            <style>
+              body {
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                background-color: #fdfaf2;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                align-items: center;
+                height: 100vh;
+                margin: 0;
+                color: #000;
+                text-align: center;
+              }
+              .border-box {
+                border: 4px solid #000;
+                padding: 30px;
+                background: #fff;
+                border-radius: 20px;
+                box-shadow: 6px 6px 0px 0px #000;
+                max-width: 400px;
+              }
+              h2 { text-transform: uppercase; margin-top: 0; margin-bottom: 10px; font-weight: 900; font-size: 1.5rem; }
+              p { font-size: 14px; opacity: 0.8; margin-bottom: 20px; }
+              .spinner {
+                display: inline-block;
+                width: 30px;
+                height: 30px;
+                border: 4px solid rgba(0,0,0,.15);
+                border-radius: 50%;
+                border-top-color: #000;
+                animation: spin 0.8s linear infinite;
+              }
+              @keyframes spin { to { transform: rotate(360deg); } }
+            </style>
+          </head>
+          <body>
+            <div class="border-box">
+              <h2>🔒 Secure Checkout</h2>
+              <p>Preparing PayPal secure payment session...</p>
+              <div class="spinner"></div>
+            </div>
+          </body>
+        </html>
+      `);
+    }
+
+    setPaymentLoading(true);
+    setPaymentError(null);
+    try {
+      const response = await fetch("/api/create-paypal-session", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          tokens: tokensCount,
+          userId: user.uid,
+        }),
+      });
+
+      if (!response.ok) {
+        let errMsg = "PayPal checkout creation failed";
+        try {
+          const errData = await response.json();
+          errMsg = errData.message || errData.error || errMsg;
+        } catch (_) {}
+        throw new Error(errMsg);
+      }
+
+      const data = await response.json();
+      if (data.url) {
+        if (checkoutWindow) {
+          checkoutWindow.location.href = data.url;
+        } else {
+          window.location.href = data.url;
+        }
+      } else {
+        throw new Error("Could not retrieve checkout url");
+      }
+    } catch (err: any) {
+      console.error("PayPal checkout failed:", err);
+      if (checkoutWindow) {
+        checkoutWindow.close();
+      }
+      setPaymentError(err.message || String(err));
+    } finally {
+      setPaymentLoading(false);
+    }
+  };
+
   const handleStripeCheckout = async (tokensCount: number) => {
     if (!user) {
       setPaymentError("You must be logged in to buy tokens.");
@@ -561,6 +664,44 @@ export default function App() {
         }
       };
       verify();
+    }
+  }, []);
+
+  // Handle PayPal Success Return
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const paypalStatus = params.get("paypal");
+    const token = params.get("token");
+    const tokens = params.get("tokens");
+    const userId = params.get("userId");
+
+    if (paypalStatus === "success" && token) {
+      const verify = async () => {
+        try {
+          const res = await fetch(`/api/verify-paypal-payment?token=${token}&tokens=${tokens || ""}&userId=${userId || ""}`);
+          const data = await res.json();
+          if (data.status === "paid") {
+            const userRef = doc(db, "users", data.userId);
+            await updateDoc(userRef, {
+              currentTokens: increment(data.tokens)
+            });
+            if (data.isSandbox) {
+              setPaymentSuccessMessage(`⚙️ Sandbox Refill: Successfully simulated refilling ${data.tokens} tokens via PayPal! [PayPal environment variable is not configured on Vercel yet, so Sandbox Mode was automatically activated]`);
+            } else {
+              setPaymentSuccessMessage(`Refilled ${data.tokens} tokens successfully via PayPal! Your transaction was captured and credited.`);
+            }
+            // Clean up URL
+            window.history.replaceState({}, document.title, "/");
+          }
+        } catch (err) {
+          console.error("PayPal redirect verification failed:", err);
+          setPaymentError("Could not verify your PayPal transaction. Please check your credentials and try again.");
+        }
+      };
+      verify();
+    } else if (paypalStatus === "cancel") {
+      setPaymentError("PayPal checkout was cancelled by the user.");
+      window.history.replaceState({}, document.title, "/");
     }
   }, []);
 
@@ -4089,87 +4230,197 @@ export default function App() {
                 Fuel the developers, keep match hosts online, and fund new feature updates! Tokens are instantly credited.
               </p>
 
-              {/* Stripe Payment Content */}
-              <div className="bg-white border-3 border-black rounded-2xl p-4 sm:p-5 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] text-center space-y-4">
-                <div className="bg-indigo-600 border-2 border-black rounded-xl p-3.5 text-center space-y-1 text-white">
-                  <div className="text-[11px] font-black uppercase tracking-wide text-yellow-300">
-                    ⚡ Stripe Secure Payments
-                  </div>
-                  <div className="text-2xl font-black font-mono leading-none my-1">
-                    $1.00 USD = 1 Token
-                  </div>
-                  <p className="text-[10px] text-indigo-100 font-medium leading-normal max-w-sm mx-auto">
-                    Experience lightning-fast instant credit with zero manual code input! Buy safely with major cards or Apple Pay.
-                  </p>
-                </div>
-
-                {/* Pre-configured Options */}
-                <div className="grid grid-cols-2 gap-2 mt-2">
-                  {[
-                    { tokens: 5, label: "🍼 Starter Pack" },
-                    { tokens: 20, label: "🚀 Cadet Cache", popular: true },
-                    { tokens: 50, label: "⚔️ Warlord Hoard" },
-                    { tokens: 100, label: "👑 Emperor Vault" }
-                  ].map((item) => (
-                    <button
-                      key={item.tokens}
-                      type="button"
-                      onClick={() => setStripeTokenQuantity(item.tokens)}
-                      className={`p-3 border-2 border-black rounded-xl text-left transition-all relative cursor-pointer ${
-                        stripeTokenQuantity === item.tokens
-                          ? 'bg-indigo-50 border-indigo-600 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]'
-                          : 'bg-stone-50 hover:bg-stone-100 shadow-[1px_1px_0px_0px_rgba(0,0,0,1)]'
-                      }`}
-                    >
-                      {item.popular && (
-                        <span className="absolute -top-2 right-2 bg-rose-500 text-white text-[7px] font-black uppercase px-1 py-0.5 rounded border border-black shadow-[1px_1px_0px_0px_rgba(0,0,0,1)]">
-                          POPULAR
-                        </span>
-                      )}
-                      <div className="text-[10px] font-black uppercase text-black/70 mb-0.5">{item.label}</div>
-                      <div className="text-sm font-black text-black">{item.tokens} Tokens</div>
-                      <div className="text-[9px] font-mono text-black/60 font-bold">${item.tokens}.00 USD</div>
-                    </button>
-                  ))}
-                </div>
-
-                {/* Custom Quantity */}
-                <div className="bg-stone-50 border-2 border-black p-3 rounded-xl text-left shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
-                  <label className="text-[9px] font-black uppercase tracking-wide text-black/75 block mb-1 font-sans">
-                    Or enter custom amount (tokens):
-                  </label>
-                  <div className="flex gap-2">
-                    <input
-                      type="number"
-                      min="1"
-                      max="10000"
-                      value={stripeTokenQuantity || ""}
-                      onChange={(e) => setStripeTokenQuantity(Math.max(1, Math.min(10000, parseInt(e.target.value) || 0)))}
-                      className="flex-1 bg-white border-2 border-black py-2 px-3 rounded-lg font-bold text-xs outline-none text-black placeholder:text-black/30"
-                      placeholder="e.g. 15"
-                    />
-                    <div className="bg-stone-100 border-2 border-black px-3.5 py-1.5 rounded-lg flex items-center justify-center font-bold text-xs font-mono text-black">
-                      ${stripeTokenQuantity || 0}.00 USD
-                    </div>
-                  </div>
-                </div>
-
-                {/* Checkout CTA */}
+              {/* Purchase Method Toggles */}
+              <div className="flex border-2 border-black rounded-xl overflow-hidden bg-stone-100 p-1 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] gap-1">
                 <button
                   type="button"
-                  onClick={() => handleStripeCheckout(stripeTokenQuantity)}
-                  disabled={paymentLoading || !stripeTokenQuantity || stripeTokenQuantity <= 0}
-                  className={`w-full py-3.5 text-center bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs border-3 border-black rounded-xl hover:-translate-y-0.5 active:translate-y-0.5 transition-all block uppercase shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] cursor-pointer ${
-                    (paymentLoading || !stripeTokenQuantity) ? 'opacity-55 cursor-not-allowed' : ''
+                  onClick={() => setActivePurchaseTab('stripe')}
+                  className={`flex-1 py-2 text-center text-[10px] font-black uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
+                    activePurchaseTab === 'stripe'
+                      ? 'bg-indigo-600 text-white border-2 border-black shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] font-semibold'
+                      : 'text-black/60 hover:text-black font-semibold'
                   }`}
                 >
-                  {paymentLoading ? (
-                    <span className="flex items-center justify-center gap-2">🌀 Directing to Stripe Secure Portal...</span>
-                  ) : (
-                    <span>💳 Secure Checkout with Stripe &rarr;</span>
-                  )}
+                  ⚡ Card / Apple Pay
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActivePurchaseTab('paypal')}
+                  className={`flex-1 py-2 text-center text-[10px] font-black uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
+                    activePurchaseTab === 'paypal'
+                      ? 'bg-amber-400 text-black border-2 border-black shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] font-semibold'
+                      : 'text-black/60 hover:text-black font-semibold'
+                  }`}
+                >
+                  💳 PayPal Secure
                 </button>
               </div>
+
+              {activePurchaseTab === 'stripe' ? (
+                /* Stripe Payment Content */
+                <div className="bg-white border-3 border-black rounded-2xl p-4 sm:p-5 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] text-center space-y-4">
+                  <div className="bg-indigo-600 border-2 border-black rounded-xl p-3.5 text-center space-y-1 text-white">
+                    <div className="text-[11px] font-black uppercase tracking-wide text-yellow-300">
+                      ⚡ Stripe Secure Payments
+                    </div>
+                    <div className="text-2xl font-black font-mono leading-none my-1">
+                      $1.00 USD = 1 Token
+                    </div>
+                    <p className="text-[10px] text-indigo-100 font-medium leading-normal max-w-sm mx-auto">
+                      Experience lightning-fast instant credit with zero manual code input! Buy safely with major cards or Apple Pay.
+                    </p>
+                  </div>
+
+                  {/* Pre-configured Options */}
+                  <div className="grid grid-cols-2 gap-2 mt-2">
+                    {[
+                      { tokens: 5, label: "🍼 Starter Pack" },
+                      { tokens: 20, label: "🚀 Cadet Cache", popular: true },
+                      { tokens: 50, label: "⚔️ Warlord Hoard" },
+                      { tokens: 100, label: "👑 Emperor Vault" }
+                    ].map((item) => (
+                      <button
+                        key={item.tokens}
+                        type="button"
+                        onClick={() => setStripeTokenQuantity(item.tokens)}
+                        className={`p-3 border-2 border-black rounded-xl text-left transition-all relative cursor-pointer ${
+                          stripeTokenQuantity === item.tokens
+                            ? 'bg-indigo-50 border-indigo-600 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]'
+                            : 'bg-stone-50 hover:bg-stone-100 shadow-[1px_1px_0px_0px_rgba(0,0,0,1)]'
+                        }`}
+                      >
+                        {item.popular && (
+                          <span className="absolute -top-2 right-2 bg-rose-500 text-white text-[7px] font-black uppercase px-1 py-0.5 rounded border border-black shadow-[1px_1px_0px_0px_rgba(0,0,0,1)]">
+                            POPULAR
+                          </span>
+                        )}
+                        <div className="text-[10px] font-black uppercase text-black/70 mb-0.5">{item.label}</div>
+                        <div className="text-sm font-black text-black">{item.tokens} Tokens</div>
+                        <div className="text-[9px] font-mono text-black/60 font-bold">${item.tokens}.00 USD</div>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Custom Quantity */}
+                  <div className="bg-stone-50 border-2 border-black p-3 rounded-xl text-left shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
+                    <label className="text-[9px] font-black uppercase tracking-wide text-black/75 block mb-1 font-sans">
+                      Or enter custom amount (tokens):
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        min="1"
+                        max="10000"
+                        value={stripeTokenQuantity || ""}
+                        onChange={(e) => setStripeTokenQuantity(Math.max(1, Math.min(10000, parseInt(e.target.value) || 0)))}
+                        className="flex-1 bg-white border-2 border-black py-2 px-3 rounded-lg font-bold text-xs outline-none text-black placeholder:text-black/30"
+                        placeholder="e.g. 15"
+                      />
+                      <div className="bg-stone-100 border-2 border-black px-3.5 py-1.5 rounded-lg flex items-center justify-center font-bold text-xs font-mono text-black">
+                        ${stripeTokenQuantity || 0}.00 USD
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Checkout CTA */}
+                  <button
+                    type="button"
+                    onClick={() => handleStripeCheckout(stripeTokenQuantity)}
+                    disabled={paymentLoading || !stripeTokenQuantity || stripeTokenQuantity <= 0}
+                    className={`w-full py-3.5 text-center bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs border-3 border-black rounded-xl hover:-translate-y-0.5 active:translate-y-0.5 transition-all block uppercase shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] cursor-pointer ${
+                      (paymentLoading || !stripeTokenQuantity) ? 'opacity-55 cursor-not-allowed' : ''
+                    }`}
+                  >
+                    {paymentLoading ? (
+                      <span className="flex items-center justify-center gap-2">🌀 Directing to Stripe Secure Portal...</span>
+                    ) : (
+                      <span>💳 Secure Checkout with Stripe &rarr;</span>
+                    )}
+                  </button>
+                </div>
+              ) : (
+                /* PayPal Payment Content */
+                <div className="bg-white border-3 border-black rounded-2xl p-4 sm:p-5 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] text-center space-y-4">
+                  <div className="bg-amber-400 border-2 border-black rounded-xl p-3.5 text-center space-y-1 text-black">
+                    <div className="text-[11px] font-black uppercase tracking-wide text-amber-905">
+                      💛 PayPal Checkout Integration
+                    </div>
+                    <div className="text-2xl font-black font-mono leading-none my-1">
+                      $1.00 USD = 1 Token
+                    </div>
+                    <p className="text-[10px] text-amber-950 font-medium leading-normal max-w-sm mx-auto">
+                      Buy game tokens safely with your PayPal account or dynamic wallet transfer. Fully automated instant delivery.
+                    </p>
+                  </div>
+
+                  {/* Pre-configured Options */}
+                  <div className="grid grid-cols-2 gap-2 mt-2">
+                    {[
+                      { tokens: 5, label: "🍼 Starter Pack" },
+                      { tokens: 20, label: "🚀 Cadet Cache", popular: true },
+                      { tokens: 50, label: "⚔️ Warlord Hoard" },
+                      { tokens: 100, label: "👑 Emperor Vault" }
+                    ].map((item) => (
+                      <button
+                        key={item.tokens}
+                        type="button"
+                        onClick={() => setStripeTokenQuantity(item.tokens)}
+                        className={`p-3 border-2 border-black rounded-xl text-left transition-all relative cursor-pointer ${
+                          stripeTokenQuantity === item.tokens
+                            ? 'bg-amber-50 border-amber-600 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]'
+                            : 'bg-stone-50 hover:bg-stone-100 shadow-[1px_1px_0px_0px_rgba(0,0,0,1)]'
+                        }`}
+                      >
+                        {item.popular && (
+                          <span className="absolute -top-2 right-2 bg-rose-500 text-white text-[7px] font-black uppercase px-1 py-0.5 rounded border border-black shadow-[1px_1px_0px_0px_rgba(0,0,0,1)]">
+                            POPULAR
+                          </span>
+                        )}
+                        <div className="text-[10px] font-black uppercase text-black/70 mb-0.5">{item.label}</div>
+                        <div className="text-sm font-black text-black">{item.tokens} Tokens</div>
+                        <div className="text-[9px] font-mono text-black/60 font-bold">${item.tokens}.00 USD</div>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Custom Quantity */}
+                  <div className="bg-stone-50 border-2 border-black p-3 rounded-xl text-left shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
+                    <label className="text-[9px] font-black uppercase tracking-wide text-black/75 block mb-1 font-sans">
+                      Or enter custom amount (tokens):
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        min="1"
+                        max="10000"
+                        value={stripeTokenQuantity || ""}
+                        onChange={(e) => setStripeTokenQuantity(Math.max(1, Math.min(10000, parseInt(e.target.value) || 0)))}
+                        className="flex-1 bg-white border-2 border-black py-2 px-3 rounded-lg font-bold text-xs outline-none text-black placeholder:text-black/30"
+                        placeholder="e.g. 15"
+                      />
+                      <div className="bg-stone-100 border-2 border-black px-3.5 py-1.5 rounded-lg flex items-center justify-center font-bold text-xs font-mono text-black">
+                        ${stripeTokenQuantity || 0}.00 USD
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Checkout CTA */}
+                  <button
+                    type="button"
+                    onClick={() => handlePaypalCheckout(stripeTokenQuantity)}
+                    disabled={paymentLoading || !stripeTokenQuantity || stripeTokenQuantity <= 0}
+                    className={`w-full py-3.5 text-center bg-[#FFC439] hover:bg-[#ebae2a] text-black font-black text-xs border-3 border-black rounded-xl hover:-translate-y-0.5 active:translate-y-0.5 transition-all block uppercase shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] cursor-pointer ${
+                      (paymentLoading || !stripeTokenQuantity) ? 'opacity-55 cursor-not-allowed' : ''
+                    }`}
+                  >
+                    {paymentLoading ? (
+                      <span className="flex items-center justify-center gap-2">🌀 Directing to PayPal Secure Portal...</span>
+                    ) : (
+                      <span>💳 Secure Checkout with PayPal &rarr;</span>
+                    )}
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="text-center mt-5">

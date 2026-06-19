@@ -206,7 +206,223 @@ async function startServer() {
     res.json({
       stripeEnabled: !!stripe,
       hasSecretKey: !!process.env.STRIPE_SECRET_KEY,
+      paypalEnabled: !!process.env.PAYPAL_CLIENT_ID,
+      hasPaypalCredentials: !!(process.env.PAYPAL_CLIENT_ID && process.env.PAYPAL_CLIENT_SECRET),
     });
+  });
+
+  // PayPal REST Helper Function
+  async function getPayPalAccessToken() {
+    const clientId = process.env.PAYPAL_CLIENT_ID;
+    const clientSecret = process.env.PAYPAL_CLIENT_SECRET;
+    const isLive = process.env.PAYPAL_MODE === "live";
+    const host = isLive ? "https://api-m.paypal.com" : "https://api-m.sandbox.paypal.com";
+
+    if (!clientId || !clientSecret) {
+      throw new Error("PayPal API credentials are not configured");
+    }
+
+    const auth = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
+    const response = await fetch(`${host}/v1/oauth2/token`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Basic ${auth}`,
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: "grant_type=client_credentials"
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Failed to get PayPal token: ${errText}`);
+    }
+
+    const data = await response.json() as any;
+    return data.access_token;
+  }
+
+  // API Route: Create PayPal Session Option
+  app.post("/api/create-paypal-session", async (req, res) => {
+    const { tokens, userId } = req.body;
+
+    const parsedTokens = Number(tokens);
+    if (tokens === undefined || tokens === null || isNaN(parsedTokens) || parsedTokens <= 0 || parsedTokens > 10000 || !Number.isInteger(parsedTokens)) {
+      return res.status(400).json({ error: "Invalid request data", message: "Token quantity must be a positive integer." });
+    }
+    if (typeof userId !== "string" || !userId || userId.trim().length === 0) {
+      return res.status(400).json({ error: "Invalid request data", message: "User identifier must be non-empty." });
+    }
+
+    const sanitizedUserId = userId.trim();
+    const baseUrl = getBaseUrl(req);
+
+    const clientId = process.env.PAYPAL_CLIENT_ID;
+    const clientSecret = process.env.PAYPAL_CLIENT_SECRET;
+
+    if (!clientId || !clientSecret) {
+      // Sandbox Checkout Simulation Mode
+      const mockOrderId = `mock_paypal_${Date.now()}_u_${sanitizedUserId}_t_${parsedTokens}`;
+      const mockOrderUrl = `${baseUrl}/?paypal=success&token=${mockOrderId}`;
+      return res.json({ id: mockOrderId, url: mockOrderUrl, isSandbox: true });
+    }
+
+    try {
+      const isLive = process.env.PAYPAL_MODE === "live";
+      const host = isLive ? "https://api-m.paypal.com" : "https://api-m.sandbox.paypal.com";
+      const accessToken = await getPayPalAccessToken();
+
+      const orderResponse = await fetch(`${host}/v2/checkout/orders`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          intent: "CAPTURE",
+          purchase_units: [
+            {
+              amount: {
+                currency_code: "USD",
+                value: `${parsedTokens}.00`
+              },
+              description: `${parsedTokens} Push Arena Game Tokens`,
+              custom_id: `${sanitizedUserId}|${parsedTokens}`
+            }
+          ],
+          application_context: {
+            brand_name: "Push Arena Strollers",
+            landing_page: "BILLING",
+            user_action: "PAY_NOW",
+            return_url: `${baseUrl}/?paypal=success&tokens=${parsedTokens}&userId=${sanitizedUserId}`,
+            cancel_url: `${baseUrl}/?paypal=cancel`
+          }
+        })
+      });
+
+      if (!orderResponse.ok) {
+        const errText = await orderResponse.text();
+        throw new Error(`Failed to create PayPal order: ${errText}`);
+      }
+
+      const orderData = await orderResponse.json() as any;
+      const approveLink = orderData.links.find((l: any) => l.rel === "approve");
+      if (!approveLink) {
+        throw new Error("No approval link returned from PayPal");
+      }
+
+      res.json({ id: orderData.id, url: approveLink.href });
+    } catch (err: any) {
+      console.error("PayPal Create Session error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // API Route: Verify PayPal Payment
+  app.get("/api/verify-paypal-payment", async (req, res) => {
+    const { token, tokens, userId } = req.query;
+    if (!token) return res.status(400).json({ error: "Missing token (PayPal Order ID)" });
+
+    // Handle Mock Sandbox Sessions
+    if (typeof token === "string" && token.startsWith("mock_paypal_")) {
+      const match = token.match(/_u_(.*)_t_(\d+)/);
+      if (match) {
+        const uId = match[1];
+        const tks = parseInt(match[2]);
+        return res.json({ 
+          status: "paid", 
+          tokens: tks,
+          userId: uId,
+          isSandbox: true
+        });
+      }
+    }
+
+    const clientId = process.env.PAYPAL_CLIENT_ID;
+    const clientSecret = process.env.PAYPAL_CLIENT_SECRET;
+
+    if (!clientId || !clientSecret) return res.status(500).json({ error: "PayPal is not configured in this environment" });
+
+    try {
+      const isLive = process.env.PAYPAL_MODE === "live";
+      const host = isLive ? "https://api-m.paypal.com" : "https://api-m.sandbox.paypal.com";
+      const accessToken = await getPayPalAccessToken();
+
+      // 1. Get current Order status
+      const orderResponse = await fetch(`${host}/v2/checkout/orders/${token}`, {
+        method: "GET",
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
+        }
+      });
+
+      if (!orderResponse.ok) {
+        const orderErr = await orderResponse.text();
+        throw new Error(`Failed to fetch PayPal order status: ${orderErr}`);
+      }
+
+      let orderData = await orderResponse.json() as any;
+
+      // 2. If APPROVED, capture it
+      if (orderData.status === "APPROVED") {
+        const captureResponse = await fetch(`${host}/v2/checkout/orders/${token}/capture`, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${accessToken}`,
+            "Content-Type": "application/json"
+          }
+        });
+
+        if (!captureResponse.ok) {
+          const capErr = await captureResponse.text();
+          throw new Error(`Failed to capture PayPal order: ${capErr}`);
+        }
+
+        orderData = await captureResponse.json() as any;
+      }
+
+      const isPaid = orderData.status === "COMPLETED";
+      if (isPaid) {
+        const purchaseUnit = orderData.purchase_units?.[0];
+        const customId = purchaseUnit?.custom_id;
+        let orderUserId = "";
+        let orderTokens = 0;
+
+        if (customId && customId.includes("|")) {
+          const parts = customId.split("|");
+          orderUserId = parts[0];
+          orderTokens = parseInt(parts[1]) || 0;
+        } else {
+          orderUserId = (userId as string) || "";
+          orderTokens = parseInt((tokens as string) || "0") || 0;
+        }
+
+        // Cross-reference charged USD amount to prevent query param injection
+        const amountValue = purchaseUnit?.amount?.value;
+        if (amountValue) {
+          const actualValue = parseFloat(amountValue);
+          if (Math.abs(actualValue - orderTokens) > 0.01) {
+            console.warn(`[PayPal Security] Amount value $${actualValue} does not match predicted tokens count ${orderTokens}`);
+            orderTokens = Math.floor(actualValue); // Force actual value in dollars
+          }
+        }
+
+        if (!orderUserId || orderTokens <= 0) {
+          throw new Error("Could not retrieve valid userId or tokens from PayPal order metadata.");
+        }
+
+        res.json({
+          status: "paid",
+          tokens: orderTokens,
+          userId: orderUserId
+        });
+      } else {
+        res.json({ status: orderData.status || "unpaid" });
+      }
+    } catch (err: any) {
+      console.error("PayPal Capture error:", err);
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // API Route: Ko-fi Webhook Listener
